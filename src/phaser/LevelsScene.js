@@ -21,8 +21,9 @@ export default class LevelsScene extends Phaser.Scene {
     background(this, card, { reducedMotion: data.settings.reducedMotion })
     enterScene(this, 160)
 
-    text(this, 54, 72, world.name, 26, card.dark ? '#fff6ea' : '#241d38', { title: true })
-    text(this, 54, 108, `${world.subtitle} · ★ ${worldStars(this.worldId)} of ${world.levelCount * 3}`, 13, card.subtext)
+    // The top band is the dark sky in every theme, so the header stays light.
+    text(this, 54, 72, world.name, 26, '#ffffff', { title: true })
+    text(this, 54, 108, `${world.subtitle} · ★ ${worldStars(this.worldId)} of ${world.levelCount * 3}`, 13, '#c3d3e8')
     iconButton(this, W - 58, 74, '‹', () => fade(this, 'worlds'), {
       size: 52,
       theme,
@@ -33,9 +34,9 @@ export default class LevelsScene extends Phaser.Scene {
     const levels = levelsOfWorld(this.worldId)
     const columns = 5
     const cellW = 116
-    const cellH = 128
+    const cellH = 104
     const startX = W / 2 - ((columns - 1) * cellW) / 2
-    const startY = 240
+    const startY = 214
 
     levels.forEach((level, index) => {
       const column = index % columns
@@ -62,20 +63,15 @@ export default class LevelsScene extends Phaser.Scene {
       }
       container.add(g)
 
-      container.add(
-        text(this, 0, -6, unlocked ? `${level.number}` : '·', 26, card.text, {
-          origin: 0.5,
-          fontStyle: 'bold',
-          alpha: unlocked ? 1 : 0.45,
-        }),
-      )
-
-      if (stars > 0) {
-        container.add(starRow(this, 0, 34, stars, { size: 13, total: 3, static: true }))
-      } else if (!unlocked) {
-        container.add(text(this, 0, 34, '🔒', 13, card.subtext, { origin: 0.5 }))
+      if (unlocked) {
+        container.add(text(this, 0, -6, `${level.number}`, 26, card.text, { origin: 0.5, fontStyle: 'bold' }))
+        if (stars > 0) {
+          container.add(starRow(this, 0, 34, stars, { size: 13, total: 3, static: true }))
+        } else {
+          container.add(text(this, 0, 34, `${level.difficulty}◆`, 11, card.subtext, { origin: 0.5, alpha: 0.8 }))
+        }
       } else {
-        container.add(text(this, 0, 34, `${level.difficulty}◆`, 11, card.subtext, { origin: 0.5, alpha: 0.8 }))
+        container.add(text(this, 0, 0, '🔒', 22, card.subtext, { origin: 0.5, alpha: 0.6 }))
       }
 
       hitArea(this, x, y, 92, 92, {
