@@ -15,8 +15,8 @@ export default class WorldsScene extends Phaser.Scene {
     background(this, theme, { reducedMotion: data.settings.reducedMotion })
     enterScene(this, 180)
 
-    text(this, 54, 74, 'Journey', 30, theme.dark ? '#fff6ea' : '#241d38', { title: true })
-    text(this, 54, 112, 'Five rooms of light', 13, theme.subtext)
+    text(this, 54, 74, 'Journey', 30, '#ffffff', { title: true })
+    text(this, 54, 112, 'Five rooms of light', 13, '#c3d3e8')
     iconButton(this, W - 58, 76, '‹', () => fade(this, 'menu'), { size: 52, theme, glyphSize: 26, fill: theme.dark ? 0x2b2250 : 0xffffff })
 
     WORLDS.forEach((world, index) => {
@@ -45,20 +45,15 @@ export default class WorldsScene extends Phaser.Scene {
       )
 
       const stars = worldStars(world.id)
-      const starIcon = starRow(this, 200, 34, 0, { size: 18, total: 3, static: true })
-      starIcon.setVisible(false)
-      container.add(text(this, 200, 30, `★ ${stars}`, 18, '#ffce55', { origin: 0.5, fontStyle: 'bold' }))
-      container.add(text(this, 200, 54, `of ${world.levelCount * 3}`, 11, card.subtext, { origin: 0.5 }))
-
-      if (!unlocked) {
-        const need = Math.max(0, (WORLD_GATE[world.id] ?? 0) - starsBeforeWorld(world.id))
-        container.add(
-          text(this, 0, 92, `Needs ${need} more star${need === 1 ? '' : 's'}`, 11, card.subtext, {
-            origin: 0.5,
-            fontStyle: 'bold',
-          }),
-        )
-      }
+      const need = Math.max(0, (WORLD_GATE[world.id] ?? 0) - starsBeforeWorld(world.id))
+      container.add(text(this, 200, 26, `★ ${stars}`, 18, '#ffce55', { origin: 0.5, fontStyle: 'bold' }))
+      container.add(
+        text(this, 200, 52, unlocked ? `of ${world.levelCount * 3}` : `needs ${need}`, 11, unlocked ? card.subtext : '#c2603f', {
+          origin: 0.5,
+          fontStyle: unlocked ? 'normal' : 'bold',
+        }),
+      )
+      void starRow
 
       hitArea(this, W / 2, y, 610, 136, {
         down: () => {
