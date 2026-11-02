@@ -91,8 +91,14 @@ export function completeLevel(level, { stars, moves, hints = 0 }) {
   return data.levels[level.id]
 }
 
-export function savePuzzleState(level, rotations, moves, hints) {
-  data.current = { levelId: level.id, rotations: { ...rotations }, moves, hints, at: Date.now() }
+export function savePuzzleState(level, state, moves, hints) {
+  data.current = {
+    levelId: level.id,
+    state: { rotations: { ...state.rotations }, placements: { ...state.placements } },
+    moves,
+    hints,
+    at: Date.now(),
+  }
   save()
 }
 
@@ -104,6 +110,11 @@ export function clearPuzzleState() {
 export function restorePuzzleState(level) {
   const current = data.current
   if (!current || current.levelId !== level.id) return null
-  if (!current.rotations || typeof current.rotations !== 'object') return null
-  return current
+  const state = current.state
+  if (!state || typeof state !== 'object' || !state.rotations) return null
+  if (typeof state.placements !== 'object' || state.placements === null) return null
+  return {
+    state: { rotations: { ...state.rotations }, placements: { ...state.placements } },
+    hints: current.hints ?? 0,
+  }
 }

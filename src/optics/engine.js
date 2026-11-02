@@ -1,11 +1,17 @@
 /*
  * The light engine.
  *
- * Pure functions of (level, rotations). Beams advance cell by cell through an
+ * Pure functions of (level, state). Beams advance cell by cell through an
  * explicit work queue; there is no recursion, no randomness and no dependency
  * on rendering. Devices that need to see other devices (gates, combiners) are
  * resolved by a bounded fixed-point loop instead of by queue order, so the same
  * board always produces the same answer.
+ *
+ * A player's "state" is `{ rotations, placements }`:
+ *   rotations  — a rotation per rotatable device, and per placed piece
+ *   placements — which tray piece sits in which socket
+ * `resolveLevel` turns that into a concrete device list; everything else works
+ * on the resolved board, so placement and rotation behave identically.
  */
 
 import {
@@ -64,10 +70,44 @@ export function defaultRotations(level) {
   return out
 }
 
+/**
+ * Expand sockets and tray pieces into the device list the beam actually sees.
+ * An empty socket is a hole in the board: light passes straight through it.
+ */
+export function resolveLevel(level, state = {}) {
+  const rotations = state?.rotations ?? state ?? {}
+  const placements = state?.placements ?? {}
+  if (!level.devices.some((device) => device.type === 'socket')) return level
+
+  const pieces = new Map((level.tray ?? []).map((piece) => [piece.id, piece]))
+  const devices = []
+  for (const device of level.devices) {
+    if (device.type !== 'socket') {
+      devices.push(device)
+      continue
+    }
+    const piece = placements[device.id] ? pieces.get(placements[device.id]) : null
+    if (!piece) continue
+    devices.push({
+      ...piece,
+      x: device.x,
+      y: device.y,
+      rotatable: true,
+      rotation: rotations[piece.id] ?? piece.rotation ?? 0,
+    })
+  }
+  return { ...level, devices }
+}
+
 function portalPartner(level, device) {
   return level.devices.find(
     (candidate) => candidate.type === 'portal' && candidate.pair === device.pair && candidate.id !== device.id,
   )
+}
+
+/** A door lets through only light that would satisfy a receiver of its colour. */
+function doorPasses(device, color) {
+  return receiverActive({ required: device.color ?? 'white', maxLeak: device.leak ?? 0.2 }, color)
 }
 
 function traceOnce(level, rotations, world) {
@@ -86,7 +126,6 @@ function traceOnce(level, rotations, world) {
       y: emitter.y,
       direction: rotationOf(level, rotations, emitter),
       color: { ...(COLORS[emitter.color ?? 'white'] ?? COLORS.white) },
-      // The emitter's own channel strength is the beam intensity.
       intensity: emitter.intensity ?? 1,
     })
   }
@@ -107,14 +146,7 @@ function traceOnce(level, rotations, world) {
     const ny = ray.y + step.y
     if (nx < 0 || ny < 0 || nx >= level.width || ny >= level.height) continue
 
-    beams.push({
-      x0: ray.x,
-      y0: ray.y,
-      x1: nx,
-      y1: ny,
-      color: ray.color,
-      sourceId: ray.sourceId ?? null,
-    })
+    beams.push({ x0: ray.x, y0: ray.y, x1: nx, y1: ny, color: ray.color, sourceId: ray.sourceId ?? null })
 
     const key = `${nx},${ny},${ray.direction},${colorKey(ray.color)}`
     if (seen.has(key)) continue
@@ -147,7 +179,11 @@ function traceOnce(level, rotations, world) {
             x: nx,
             y: ny,
             direction: branch.direction,
-            color: { r: branch.channel === 'r' ? value : 0, g: branch.channel === 'g' ? value : 0, b: branch.channel === 'b' ? value : 0 },
+            color: {
+              r: branch.channel === 'r' ? value : 0,
+              g: branch.channel === 'g' ? value : 0,
+              b: branch.channel === 'b' ? value : 0,
+            },
           })
         }
         break
@@ -161,33 +197,24 @@ function traceOnce(level, rotations, world) {
         break
       }
 
+      case 'door':
+        if (doorPasses(device, ray.color)) queue.push({ ...ray, x: nx, y: ny })
+        break
+
       case 'portal': {
         const partner = portalPartner(level, device)
         if (partner) {
-          queue.push({
-            ...ray,
-            x: partner.x,
-            y: partner.y,
-            direction: (ray.direction + (partner.rotation ?? 0)) % 4,
-          })
+          queue.push({ ...ray, x: partner.x, y: partner.y, direction: (ray.direction + (partner.rotation ?? 0)) % 4 })
         }
         break
       }
 
       case 'combiner': {
         accumulate(combinerInput, device.id, ray.color)
-        // Emit the light gathered on the previous pass, once per pass, so a
-        // combiner can merge beams without the queue order mattering.
         const stored = world.combiners?.[device.id]
         if (stored && !isDark(stored) && !combinerEmitted.has(device.id)) {
           combinerEmitted.add(device.id)
-          queue.push({
-            ...ray,
-            x: nx,
-            y: ny,
-            direction: rotation,
-            color: clampColor(stored),
-          })
+          queue.push({ ...ray, x: nx, y: ny, direction: rotation, color: clampColor(stored) })
         }
         break
       }
@@ -200,10 +227,15 @@ function traceOnce(level, rotations, world) {
         if (world.switches?.[device.switchId]) queue.push({ ...ray, x: nx, y: ny })
         break
 
-      case 'receiver':
-        accumulate(receiverHits, device.id, ray.color)
+      case 'receiver': {
+        // A directional crystal only accepts light arriving from one side.
+        if (device.enter === undefined || device.enter === ray.direction) {
+          accumulate(receiverHits, device.id, ray.color)
+        }
         break
+      }
 
+      case 'socket':
       case 'emitter':
       case 'blocker':
       default:
@@ -218,6 +250,7 @@ function traceOnce(level, rotations, world) {
       x: device.x,
       y: device.y,
       required: device.required ?? 'white',
+      enter: device.enter,
       color,
       illumination: color.r + color.g + color.b,
       active: receiverActive(device, color),
@@ -252,17 +285,11 @@ function sameSwitches(a, b) {
 function sameCombiners(a, b) {
   const keys = new Set([...Object.keys(a ?? {}), ...Object.keys(b ?? {})])
   for (const key of keys) {
-    const left = a?.[key] ?? ZERO
-    const right = b?.[key] ?? ZERO
-    if (colorKey(left) !== colorKey(right)) return false
+    if (colorKey(a?.[key] ?? ZERO) !== colorKey(b?.[key] ?? ZERO)) return false
   }
   return true
 }
 
-/**
- * Evaluate a board. Runs the fixed-point loop so gates and combiners settle,
- * then returns the final light picture.
- */
 export function evaluate(level, rotations = {}, { maxPasses = MAX_PASSES } = {}) {
   let world = { switches: {}, combiners: {} }
   let result = traceOnce(level, rotations, world)
@@ -275,7 +302,12 @@ export function evaluate(level, rotations = {}, { maxPasses = MAX_PASSES } = {})
   return { ...result, passes: maxPasses }
 }
 
-/** Unlit receivers are the ones a player still has to solve for. */
+/** Evaluate a player state: sockets resolved, then the beam traced. */
+export function evaluateState(level, state = {}) {
+  const resolved = resolveLevel(level, state)
+  return evaluate(resolved, state?.rotations ?? state ?? {})
+}
+
 export function missingReceivers(result) {
   return result.receivers.filter((receiver) => !receiver.active)
 }

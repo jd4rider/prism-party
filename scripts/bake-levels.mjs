@@ -3,17 +3,18 @@
  *
  *   node scripts/bake-levels.mjs [--world 3] [--count 40] [--verbose]
  *
- * Builds candidate boards, solves each one exhaustively, scrambles the ones
- * that have a solution, and writes src/levels/campaign.js. Any level that fails
- * validation is dropped rather than shipped, so the level count in the output
- * is a fact rather than a target.
+ * Builds a candidate, checks the construction actually solves its own board,
+ * scrambles rotations and piece placement, then hands it to the solver. A level
+ * ships only if the solver finds exactly one solution and the starting position
+ * is at least the world's floor away from it — and the floor rises inside each
+ * world, so world 5 ends up needing many more taps than world 1.
  */
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { WORLD_DEFS, buildCandidate, mulberry32 } from '../src/optics/generator.js'
-import { inspectLevel, moveDistance } from '../src/optics/solver.js'
-import { evaluate } from '../src/optics/engine.js'
+import { WORLD_DEFS, archetypesFor, buildCandidate, initialPlacements, mulberry32 } from '../src/optics/generator.js'
+import { boardDevices, inspectLevel, moveDistance } from '../src/optics/solver.js'
+import { evaluateState } from '../src/optics/engine.js'
 import { deviceStates } from '../src/optics/model.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -29,19 +30,38 @@ const targetCount = argValue('count', 40)
 const verbose = args.includes('--verbose')
 
 function scramble(level, random) {
-  const rotatable = level.devices.filter((device) => device.rotatable)
   const rotations = {}
-  for (const device of rotatable) rotations[device.id] = Math.floor(random() * deviceStates(device))
+  for (const device of boardDevices(level)) rotations[device.id] = Math.floor(random() * deviceStates(device))
+  for (const piece of level.tray) {
+    rotations[piece.id] = Math.floor(random() * deviceStates({ type: piece.type, rotatable: true }))
+  }
   return rotations
 }
 
+/** How many actions this slot should need: the world floor, creeping up. */
+function targetMoves(worldDef, number) {
+  return (worldDef.floor ?? 2) + Math.floor((number - 1) / 12)
+}
+
 function buildLevel(worldDef, number) {
-  let attempts = 0
-  while (attempts < 160) {
-    attempts += 1
-    const seed = worldDef.id * 100000 + number * 131 + attempts * 7717
+  const target = targetMoves(worldDef, number)
+  const floor = worldDef.floor ?? 2
+  let best = null
+  let fallback = null
+  // Every slot asks for a particular archetype first, so the campaign rotates
+  // through the whole set instead of whatever happens to build fastest.
+  const pool = archetypesFor(worldDef.id)
+  const wanted = pool[(number - 1) % pool.length]
+
+  for (let attempt = 1; attempt <= 300; attempt += 1) {
+    const seed = worldDef.id * 100000 + number * 131 + attempt * 7717
     const random = mulberry32(seed)
-    const candidate = buildCandidate({ world: worldDef.id, size: worldDef.size, random })
+    const candidate = buildCandidate({
+      world: worldDef.id,
+      size: worldDef.size,
+      random,
+      name: attempt <= 140 ? wanted : undefined,
+    })
     if (!candidate) continue
 
     const level = {
@@ -51,49 +71,53 @@ function buildLevel(worldDef, number) {
       width: candidate.width,
       height: candidate.height,
       devices: candidate.devices,
+      tray: candidate.tray,
+      archetype: candidate.archetype,
       seed,
     }
 
-    // The construction's own configuration must actually finish the board. If
-    // it does not, the generator wired something wrong and the candidate is
-    // thrown away rather than patched up.
-    const builtRotations = {}
-    for (const device of level.devices) if (device.rotatable) builtRotations[device.id] = device.rotation ?? 0
-    if (!evaluate(level, builtRotations).solved) continue
+    if (!evaluateState(level, candidate.solution).solved) continue
 
-    // Scramble the solution and make sure the player has real work to do.
-    let initial = null
-    let best = null
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      const rotations = scramble(level, random)
-      if (evaluate(level, rotations).solved) continue
-      const inspected = inspectLevel({ ...level, initialRotations: rotations })
+    for (let scrambleAttempt = 0; scrambleAttempt < 24; scrambleAttempt += 1) {
+      const initialState = {
+        rotations: scramble(level, random),
+        placements: initialPlacements(level, candidate.solution.placements, random),
+      }
+      if (evaluateState(level, initialState).solved) continue
+
+      const inspected = inspectLevel({ ...level, initialState })
       if (!inspected.ok) continue
-      if (inspected.minMoves < 2) continue
-      initial = rotations
-      best = inspected
-      break
-    }
-    if (!initial || !best) continue
+      if (inspected.solutionCount !== 1) continue
+      if (inspected.truncated) continue
+      if (!evaluateState(level, inspected.solution).solved) continue
+      if (moveDistance(level, initialState, inspected.solution) !== inspected.minMoves) continue
 
-    const solution = best.solution
-    // The scrambler can land on a solution other than the one we built; the
-    // stored solution must satisfy the level as shipped.
-    if (!evaluate(level, solution).solved) continue
-    if (moveDistance(level, initial, solution) !== best.minMoves) continue
+      const built = {
+        ...level,
+        initialState,
+        solution: inspected.solution,
+        minMoves: inspected.minMoves,
+        solutionCount: inspected.solutionCount,
+        difficulty: inspected.difficulty,
+        mechanics: [...new Set(level.devices.map((device) => device.type))].sort(),
+        attempts: attempt,
+      }
 
-    return {
-      ...level,
-      initialRotations: initial,
-      solution,
-      minMoves: best.minMoves,
-      solutionCount: best.solutionCount,
-      difficulty: best.difficulty,
-      mechanics: [...new Set(level.devices.map((device) => device.type))].sort(),
-      attempts,
+      // Below the floor a board is too easy to ship, but it is still better than
+      // an empty slot if this world's archetypes never reach the floor.
+      if (built.minMoves < floor) {
+        if (!fallback || built.minMoves > fallback.minMoves) fallback = built
+        continue
+      }
+
+      // Stop as soon as the slot is as hard as it should be; otherwise keep the
+      // deepest board found so a level never regresses to something trivial.
+      if (built.minMoves >= target) return built
+      if (!best || built.minMoves > best.minMoves) best = built
     }
   }
-  return null
+
+  return best ?? fallback
 }
 
 const worlds = []
@@ -110,24 +134,25 @@ for (const worldDef of WORLD_DEFS) {
       continue
     }
     made.push(level)
-    levels.push(level)
     if (verbose) {
       console.log(
-        `  ${level.id} ${level.width}x${level.height} devices=${level.devices.length} rotatable=${
-          level.devices.filter((device) => device.rotatable).length
-        } moves=${level.minMoves} solutions=${level.solutionCount} attempts=${level.attempts}`,
+        `  ${level.id} ${level.archetype.padEnd(11)} ${level.width}x${level.height} moves=${level.minMoves} ` +
+          `devices=${level.devices.length} tray=${level.tray.length} difficulty=${level.difficulty}`,
       )
     }
   }
-  // Order each world by how hard it actually is, so the campaign ramps up
-  // instead of bouncing around because of the seed order.
-  made.sort((a, b) => a.difficulty - b.difficulty || a.minMoves - b.minMoves || a.number - b.number)
+  // Deepest last: the room ramps even though every slot met the world floor.
+  made.sort((a, b) => a.minMoves - b.minMoves || a.difficulty - b.difficulty || a.number - b.number)
   made.forEach((level, position) => {
     level.number = position + 1
     level.id = `w${worldDef.id}-${String(position + 1).padStart(2, '0')}`
   })
+  levels.push(...made)
   worlds.push({ ...worldDef, levelCount: made.length })
-  console.log(`world ${worldDef.id} — ${worldDef.name}: ${made.length}/${targetCount} levels, ${failures.length} failed so far`)
+  console.log(
+    `world ${worldDef.id} — ${worldDef.name}: ${made.length}/${targetCount} levels, ` +
+      `moves ${made[0]?.minMoves ?? 0}–${made[made.length - 1]?.minMoves ?? 0}, ${failures.length} failed so far`,
+  )
 }
 
 levels.sort((a, b) => a.world - b.world || a.number - b.number)
@@ -137,17 +162,20 @@ levels.forEach((level, index) => {
 
 const byWorld = new Map()
 for (const level of levels) byWorld.set(level.world, (byWorld.get(level.world) ?? 0) + 1)
-const withMechanic = (type) => levels.filter((level) => level.devices.some((device) => device.type === type)).length
 
+const withMechanic = (type) => levels.filter((level) => level.devices.some((device) => device.type === type)).length
 console.log('\nmechanics coverage')
-for (const type of ['mirror', 'prism', 'filter', 'splitter', 'portal', 'gate', 'switch', 'combiner']) {
+for (const type of ['mirror', 'prism', 'filter', 'splitter', 'door', 'socket', 'blocker', 'portal', 'gate']) {
   console.log(`  ${type.padEnd(9)} ${withMechanic(type)} levels`)
 }
-console.log('\nsolutions per level')
-const buckets = {}
-for (const level of levels) buckets[level.solutionCount] = (buckets[level.solutionCount] ?? 0) + 1
-console.log(buckets)
+
+const archetypes = {}
+for (const level of levels) archetypes[level.archetype] = (archetypes[level.archetype] ?? 0) + 1
+console.log('\narchetypes', archetypes)
 console.log('difficulty spread', levels.reduce((out, level) => ({ ...out, [level.difficulty]: (out[level.difficulty] ?? 0) + 1 }), {}))
+console.log(`levels requiring dragged pieces: ${levels.filter((level) => level.tray.length > 0).length}/${levels.length}`)
+console.log(`total pieces to place: ${levels.reduce((sum, level) => sum + level.tray.length, 0)}`)
+console.log(`total walls: ${levels.reduce((sum, level) => sum + level.devices.filter((d) => d.type === 'blocker').length, 0)}`)
 
 const header = `// Generated by scripts/bake-levels.mjs — do not edit by hand.
 // Every level below was built from a solved configuration and then re-solved
@@ -179,4 +207,4 @@ export function levelsOfWorld(world) {
 await mkdir(resolve(root, 'src/levels'), { recursive: true })
 await writeFile(resolve(root, 'src/levels/campaign.js'), `${header}\n${body}`)
 console.log(`\nwrote ${levels.length} levels (${failures.length} rejected) to src/levels/campaign.js`)
-if (failures.length > 0) console.log('rejected:', failures.join(', '))
+if (failures.length > 0) console.log('rejected:', failures.slice(0, 40).join(', '), failures.length > 40 ? '…' : '')

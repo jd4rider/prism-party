@@ -5,7 +5,7 @@
  */
 
 export const SAVE_KEY = 'prism-party-save-v1'
-export const SAVE_VERSION = 3
+export const SAVE_VERSION = 4
 
 function emptySave() {
   return {

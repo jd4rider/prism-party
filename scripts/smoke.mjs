@@ -1,17 +1,15 @@
 /*
  * Browser smoke test for the built game.
  *
- *   npm run build && npx vite preview --port 4183 --strictPort &
+ *   npm run build
+ *   npx vite preview --port 4183 --strictPort &
  *   node scripts/smoke.mjs
  *
- * Drives the real canvas with real pointer events, then finishes the board
- * through the same rotate() path the touch handler uses. Screenshots land in
- * /tmp/prism-*.png for a visual pass.
+ * Drives the real canvas with real pointer events — including an actual drag of a
+ * tray piece into a socket — then finishes the board through the same methods the
+ * input handlers call. Screenshots land in /tmp/prism-*.png for a visual pass.
  */
 import { chromium } from 'playwright-core'
-import { mkdtemp } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 
 const URL = process.env.PRISM_URL ?? 'http://localhost:4183/'
 const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
@@ -73,6 +71,18 @@ async function tap(sceneX, sceneY) {
   await sleep(120)
 }
 
+async function drag(from, to) {
+  const a = await canvasPoint(from.x, from.y)
+  const b = await canvasPoint(to.x, to.y)
+  await page.mouse.move(a.x, a.y)
+  await page.mouse.down()
+  await sleep(60)
+  await page.mouse.move(b.x, b.y, { steps: 14 })
+  await sleep(80)
+  await page.mouse.up()
+  await sleep(200)
+}
+
 try {
   await page.goto(URL, { waitUntil: 'load' })
   await page.waitForFunction(() => Boolean(window.prismParty?.scene?.getScene('menu')?.scene?.isActive()), null, {
@@ -95,11 +105,8 @@ try {
       id: scene.level.id,
       world: scene.level.world,
       devices: scene.level.devices.length,
-      rotatable: scene.level.devices.filter((device) => device.rotatable).length,
       receivers: scene.level.devices.filter((device) => device.type === 'receiver').length,
-      rotation: scene.rotations,
-      solution: scene.level.solution,
-      minMoves: scene.level.minMoves,
+      tray: (scene.level.tray ?? []).length,
       beams: scene.result.beams.length,
     }
   })
@@ -110,58 +117,124 @@ try {
   // Real pointer tap on a rotatable device.
   const target = await page.evaluate(() => {
     const scene = window.prismParty.scene.getScene('puzzle')
-    const device = scene.level.devices.find((item) => item.rotatable)
+    const device = scene.level.devices.find((item) => item.rotatable && item.type !== 'socket')
     if (!device) return null
     const center = scene.cellCenter(device.x, device.y)
-    return { id: device.id, x: center.x, y: center.y, before: scene.rotations[device.id] ?? 0 }
+    return { id: device.id, x: center.x, y: center.y, before: scene.state.rotations[device.id] ?? 0 }
   })
   if (target) {
     await tap(target.x, target.y)
     const after = await page.evaluate((id) => {
       const scene = window.prismParty.scene.getScene('puzzle')
-      return { rotation: scene.rotations[id] ?? 0, moves: scene.moves, redo: scene.history.length }
+      return { rotation: scene.state.rotations[id] ?? 0, moves: scene.moves }
     }, target.id)
     check('tapping a device turns it', after.rotation !== target.before, `${target.before} → ${after.rotation}`)
-    check('the turn is counted', after.moves === 1, `${after.moves} turns`)
+    check('the turn is counted', after.moves === 1, `${after.moves} actions`)
 
-    // Undo through the real button (first in the control row), then solve.
     await tap(124, 930)
     const undone = await page.evaluate(() => window.prismParty.scene.getScene('puzzle').moves)
-    check('undo steps back', undone === 0, `${undone} turns`)
+    check('undo steps back', undone === 0, `${undone} actions`)
     const restored = await page.evaluate((id) => {
       const scene = window.prismParty.scene.getScene('puzzle')
-      return scene.rotations[id] ?? 0
+      return scene.state.rotations[id] ?? 0
     }, target.id)
     check('undo restores the old rotation', restored === target.before, `${restored}`)
   }
 
-  // Finish through rotate(), the same entry point the pointer handler calls.
+  // Jump to a board that actually has pieces to place.
+  const pieceLevel = await page.evaluate(() => {
+    const levels = window.prismPartyLevels ?? []
+    const index = levels.findIndex(
+      (level) => (level.tray ?? []).length >= 2 && level.devices.some((device) => device.type === 'socket'),
+    )
+    if (index < 0) return null
+    const scene = window.prismParty.scene.getScene('puzzle')
+    scene.scene.start('puzzle', { level: levels[index], mode: 'zen' })
+    return { index, id: levels[index].id, tray: levels[index].tray.length }
+  })
+  check('a placement board exists in the campaign', Boolean(pieceLevel), pieceLevel?.id ?? 'none')
+  if (pieceLevel) {
+    await sleep(700)
+    await waitScene('puzzle')
+    await sleep(500)
+    await shot('placement')
+
+    const setup = await page.evaluate(() => {
+      const scene = window.prismParty.scene.getScene('puzzle')
+      const piece = (scene.level.tray ?? [])[0]
+      const socket = scene.level.devices.find((device) => device.type === 'socket')
+      if (!piece || !socket) return null
+      const slot = scene.traySlots.get(piece.id)
+      return {
+        piece: piece.id,
+        socket: socket.id,
+        // Boards start with pieces already in the wrong sockets, so "undone"
+        // means back to this, not necessarily empty.
+        before: scene.state.placements[socket.id] ?? null,
+        from: { x: slot.x, y: slot.y },
+        to: scene.cellCenter(socket.x, socket.y),
+      }
+    })
+    if (setup) {
+      await drag(setup.from, setup.to)
+      const placed = await page.evaluate((socketId) => {
+        const scene = window.prismParty.scene.getScene('puzzle')
+        return { piece: scene.state.placements[socketId] ?? null, moves: scene.moves }
+      }, setup.socket)
+      check('dragging a piece into a socket seats it', placed.piece === setup.piece, `${placed.piece}`)
+      check('the placement is one action', placed.moves === 1, `${placed.moves} actions`)
+
+      await tap(setup.to.x, setup.to.y)
+      const turned = await page.evaluate((id) => {
+        const scene = window.prismParty.scene.getScene('puzzle')
+        return { rotation: scene.state.rotations[id] ?? 0, moves: scene.moves }
+      }, setup.piece)
+      check('tapping the seated piece turns it', turned.rotation !== 0 || turned.moves === 2, `${turned.moves} actions`)
+
+      await tap(124, 930)
+      await tap(124, 930)
+      const cleared = await page.evaluate((socketId) => {
+        const scene = window.prismParty.scene.getScene('puzzle')
+        return { piece: scene.state.placements[socketId] ?? null, moves: scene.moves }
+      }, setup.socket)
+      check(
+        'two undos restore the original tray arrangement',
+        cleared.piece === setup.before && cleared.moves === 0,
+        `${cleared.moves} actions, socket holds ${cleared.piece}`,
+      )
+    }
+  }
+
+  // Finish the board through the same methods the input handlers use.
   const solved = await page.evaluate(async () => {
     const scene = window.prismParty.scene.getScene('puzzle')
-    const states = { mirror: 2, prism: 4, filter: 6, splitter: 4 }
-    for (const device of scene.level.devices) {
-      if (!device.rotatable) continue
-      const want = scene.level.solution[device.id]
-      let guard = 0
-      while ((scene.rotations[device.id] ?? 0) !== want && guard < 8) {
-        scene.rotate(device)
-        guard += 1
-      }
-      void states
+    const solution = scene.level.solution
+    for (const [socketId, pieceId] of Object.entries(solution.placements ?? {})) {
+      if (pieceId) scene.placePiece(socketId, pieceId)
     }
+    const placedIds = new Set(Object.values(solution.placements ?? {}).filter(Boolean))
+    for (const piece of scene.level.tray ?? []) {
+      if (placedIds.has(piece.id)) scene.turnTo(piece, solution.rotations[piece.id] ?? 0)
+    }
+    for (const device of scene.level.devices) {
+      if (!device.rotatable || device.type === 'socket') continue
+      scene.turnTo(device, solution.rotations[device.id] ?? 0)
+    }
+    scene.applyState({ animate: false })
     await new Promise((resolve) => setTimeout(resolve, 1200))
     return {
       solved: scene.result.solved,
       finished: scene.finished,
       moves: scene.moves,
+      minMoves: scene.level.minMoves,
       stars: JSON.parse(localStorage.getItem('prism-party-save-v1') || '{}')?.levels?.[scene.level.id]?.stars ?? 0,
       id: scene.level.id,
     }
   })
   check('the stored solution lights every crystal', solved.solved === true)
-  check('the results flow completes', solved.finished === true, `${solved.moves} turns`)
+  check('the results flow completes', solved.finished === true, `${solved.moves} actions`)
   check('stars are recorded', solved.stars > 0, `${solved.stars} stars on ${solved.id}`)
-  await sleep(400)
+  await sleep(500)
   await shot('result')
 
   // Reload and confirm the save survived.
@@ -199,7 +272,6 @@ try {
   check('smoke run completed', false, error.message)
 } finally {
   await browser.close()
-  await mkdtemp(join(tmpdir(), 'prism-')).catch(() => {})
 }
 
 const failed = results.filter((item) => !item.ok)

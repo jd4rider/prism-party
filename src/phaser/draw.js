@@ -117,7 +117,7 @@ function drawEmitter(graphics, size, theme, color) {
   graphics.fillCircle(-r * 0.18, -r * 0.2, r * 0.22)
 }
 
-function drawReceiver(graphics, size, theme, color, active) {
+function drawReceiver(graphics, size, theme, color, active, enter) {
   basePlate(graphics, size, theme)
   const r = size * 0.32
   const hex = active ? lightToHex(color) : mix(theme.tile, 0x22303d, 0.55)
@@ -137,9 +137,20 @@ function drawReceiver(graphics, size, theme, color, active) {
   graphics.fillTriangle(0, -r * 1.22, -r * 0.72, 0, 0, r * 1.22)
   graphics.fillStyle(0xffffff, active ? 0.85 : 0.25)
   graphics.fillTriangle(0, -r * 1.0, r * 0.24, -r * 0.1, -r * 0.2, r * 0.1)
-  graphics.lineStyle(1.4, active ? 0xffffff : 0xffffff, active ? 0.8 : 0.3)
+  graphics.lineStyle(1.4, 0xffffff, active ? 0.8 : 0.3)
   graphics.strokeTriangle(0, -r * 1.35, r * 0.85, 0, 0, r * 1.35)
   graphics.strokeTriangle(0, -r * 1.35, -r * 0.85, 0, 0, r * 1.35)
+
+  // A directional crystal shows which side it drinks from, so the rule is
+  // visible before the beam finds it.
+  if (enter !== undefined && enter !== null) {
+    const angle = [Math.PI / 2, 0, -Math.PI / 2, Math.PI][((enter % 4) + 4) % 4]
+    const tip = { x: Math.cos(angle) * r * 1.05, y: Math.sin(angle) * -r * 1.05 }
+    const back = { x: Math.cos(angle + 2.4) * r * 0.42, y: Math.sin(angle + 2.4) * -r * 0.42 }
+    const back2 = { x: Math.cos(angle - 2.4) * r * 0.42, y: Math.sin(angle - 2.4) * -r * 0.42 }
+    graphics.fillStyle(active ? 0xffffff : mix(theme.tile, 0x111111, 0.35), active ? 0.95 : 0.6)
+    graphics.fillTriangle(tip.x, tip.y, back.x, back.y, back2.x, back2.y)
+  }
 }
 
 function drawPortal(graphics, size, theme) {
@@ -187,6 +198,92 @@ function drawSwitch(graphics, size, theme, on) {
   graphics.fillCircle(-r * 0.25, -r * 0.25, r * 0.24)
 }
 
+/**
+ * A socket is a hole in the tray with four corner ticks: the player's cue that
+ * something has to be dropped in. `setHighlight` is the only stateful part.
+ */
+export function drawSocket(scene, size, theme) {
+  const container = scene.add.container(0, 0)
+  const hole = scene.add.graphics()
+  const half = size * 0.31
+  hole.fillStyle(0x000000, 0.28)
+  hole.fillRoundedRect(-half, -half, half * 2, half * 2, size * 0.14)
+  hole.fillStyle(mix(theme.traySide, 0x000000, 0.4), 1)
+  hole.fillRoundedRect(-half + 2, -half + 2, half * 2 - 4, half * 2 - 4, size * 0.12)
+  hole.fillStyle(0xffffff, 0.08)
+  hole.fillRoundedRect(-half + 4, -half + 4, half * 2 - 8, size * 0.14, size * 0.07)
+  hole.lineStyle(2, 0xffffff, 0.2)
+  hole.strokeRoundedRect(-half + 2, -half + 2, half * 2 - 4, half * 2 - 4, size * 0.12)
+
+  const ticks = scene.add.graphics()
+  ticks.lineStyle(2.4, theme.accent, 0.75)
+  const t = size * 0.1
+  const corners = [
+    [-half, -half, 1, 1],
+    [half, -half, -1, 1],
+    [-half, half, 1, -1],
+    [half, half, -1, -1],
+  ]
+  for (const [x, y, dx, dy] of corners) {
+    ticks.lineBetween(x, y, x + t * dx, y)
+    ticks.lineBetween(x, y, x, y + t * dy)
+  }
+
+  const plus = scene.add.graphics()
+  plus.lineStyle(2, 0xffffff, 0.28)
+  plus.lineBetween(-size * 0.07, 0, size * 0.07, 0)
+  plus.lineBetween(0, -size * 0.07, 0, size * 0.07)
+
+  const ring = scene.add.graphics()
+  ring.lineStyle(3, theme.accent, 1)
+  ring.strokeRoundedRect(-half - 3, -half - 3, half * 2 + 6, half * 2 + 6, size * 0.16)
+  ring.setAlpha(0)
+
+  container.add([hole, ticks, plus, ring])
+  return {
+    container,
+    setHighlight(mode) {
+      ring.setAlpha(mode === 'hot' ? 1 : 0)
+      plus.setVisible(mode !== 'full')
+      ticks.setAlpha(mode === 'full' ? 0.35 : 1)
+    },
+    setRotation() {},
+    setActive() {},
+    setOpen() {},
+    refresh() {},
+    destroy() {
+      container.destroy()
+    },
+  }
+}
+
+/** A colour-locked door: two posts and a tinted pane only that colour opens. */
+function drawDoor(graphics, size, theme, colorName) {
+  basePlate(graphics, size, theme)
+  const half = size * 0.33
+  const post = size * 0.12
+  const hex = lightToHex(COLORS[colorName] ?? COLORS.white)
+  graphics.fillStyle(hex, 0.16)
+  graphics.fillRoundedRect(-half, -half, half * 2, half * 2, size * 0.1)
+  graphics.fillStyle(0x121b26, 0.95)
+  graphics.fillRoundedRect(-half, -half, post, half * 2, 3)
+  graphics.fillRoundedRect(half - post, -half, post, half * 2, 3)
+  graphics.fillStyle(hex, 0.42)
+  graphics.fillRoundedRect(-half + post, -half + 3, half * 2 - post * 2, half * 2 - 6, 2)
+  graphics.lineStyle(1.6, hex, 0.95)
+  graphics.strokeRoundedRect(-half, -half, post, half * 2, 3)
+  graphics.strokeRoundedRect(half - post, -half, post, half * 2, 3)
+  // Bars read as "locked" without relying on hue alone.
+  graphics.lineStyle(1.4, 0xffffff, 0.4)
+  for (let bar = 1; bar < 4; bar += 1) {
+    const x = -half + post + ((half * 2 - post * 2) * bar) / 4
+    graphics.lineBetween(x, -half + 5, x, half - 5)
+  }
+  graphics.fillStyle(mix(hex, 0xffffff, 0.6), 0.9)
+  graphics.fillCircle(-half + 4, -half + 4, size * 0.045)
+  graphics.fillCircle(half - 4, half - 4, size * 0.045)
+}
+
 function drawBlocker(graphics, size, theme) {
   graphics.fillStyle(0x000000, 0.25)
   graphics.fillEllipse(2, size * 0.3, size * 0.7, size * 0.24)
@@ -208,6 +305,9 @@ export function maskForDevice(device, rotation) {
  * simulation: receiver activation, switch state, gate shutters, filter colour.
  */
 export function drawDevice(scene, device, size, theme, options = {}) {
+  // Sockets build their own container: they are a hole, not a figurine.
+  if (device.type === 'socket') return drawSocket(scene, size, theme)
+
   const container = scene.add.container(0, 0)
   const body = scene.add.graphics()
   container.add(body)
@@ -237,7 +337,10 @@ export function drawDevice(scene, device, size, theme, options = {}) {
         drawEmitter(graphic, size, theme, COLORS[device.color ?? 'white'] ?? COLORS.white)
         break
       case 'receiver':
-        drawReceiver(graphic, size, theme, state.color, state.active)
+        drawReceiver(graphic, size, theme, state.color, state.active, device.enter)
+        break
+      case 'door':
+        drawDoor(graphic, size, theme, device.color)
         break
       case 'portal':
         drawPortal(graphic, size, theme)

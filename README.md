@@ -1,7 +1,11 @@
 # Prism Party
 
 A 2.5D light-routing puzzle for [Little Joy Arcade](https://littlejoyarcade.site).
-Turn mirrors, split the spectrum and light every crystal.
+Drag mirrors out of the tray, thread the beam past walls and colour doors, split the
+spectrum, and light every crystal.
+
+Not every optic is on the board: **sockets** are empty holes that need a piece dragged
+into them, so most boards cannot be solved by turning alone.
 
 - **Play:** <https://jd4rider.github.io/prism-party/play/>
 - **Planned host:** <https://prismparty.littlejoyarcade.site>

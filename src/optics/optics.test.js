@@ -12,7 +12,7 @@ import {
   splitterBranches,
   turn,
 } from './model.js'
-import { evaluate } from './engine.js'
+import { evaluate, evaluateState } from './engine.js'
 import { buildCandidate, mulberry32 } from './generator.js'
 import { moveDistance, rateDifficulty, solve, validateLevel } from './solver.js'
 
@@ -257,17 +257,86 @@ test('difficulty rises with the number of devices that must be turned', () => {
   assert.ok(rateDifficulty(big, 1) > rateDifficulty(small, 1))
 })
 
+test('a socket is a hole until the right piece is dragged in', () => {
+  const board = {
+    width: 7,
+    height: 7,
+    devices: [
+      { id: 'e1', type: 'emitter', x: 0, y: 3, rotation: 1, color: 'white' },
+      { id: 's1', type: 'socket', x: 3, y: 3, rotation: 0 },
+      { id: 'r1', type: 'receiver', x: 3, y: 0, rotation: 0, required: 'white' },
+    ],
+    tray: [
+      { id: 'pm', type: 'mirror', rotation: 0 },
+      { id: 'pd', type: 'prism', rotation: 0 },
+    ],
+  }
+  assert.equal(evaluateState(board, {}).solved, false, 'an empty socket lets the beam through')
+  assert.equal(
+    evaluateState(board, { rotations: { pm: 0 }, placements: { s1: 'pm' } }).solved,
+    true,
+    'a mirror in the socket turns the beam north',
+  )
+  assert.equal(
+    evaluateState(board, { rotations: { pd: 0 }, placements: { s1: 'pd' } }).solved,
+    false,
+    'the decoy prism splits the colour and misses',
+  )
+})
+
+test('the solver has to place a piece, not just turn devices', () => {
+  const board = {
+    width: 7,
+    height: 7,
+    devices: [
+      { id: 'e1', type: 'emitter', x: 0, y: 3, rotation: 1, color: 'white' },
+      { id: 's1', type: 'socket', x: 3, y: 3, rotation: 0 },
+      { id: 'r1', type: 'receiver', x: 3, y: 0, rotation: 0, required: 'white' },
+    ],
+    tray: [
+      { id: 'pm', type: 'mirror', rotation: 0 },
+      { id: 'pd', type: 'prism', rotation: 0 },
+    ],
+  }
+  const { solutions } = solve(board)
+  assert.ok(solutions.length >= 1)
+  assert.equal(solutions[0].placements.s1, 'pm', 'the mirror belongs in the socket')
+  assert.equal(evaluateState(board, solutions[0]).solved, true)
+})
+
+test('a door only opens for the colour it is cut for', () => {
+  const withFilter = level([
+    emitter(0, 3, 1),
+    { id: 'f1', type: 'filter', x: 1, y: 3, rotation: 0, pass: 'red' },
+    { id: 'dd', type: 'door', x: 2, y: 3, rotation: 0, color: 'red' },
+    receiver(4, 3, 'red'),
+  ])
+  assert.equal(evaluate(withFilter, {}).solved, true, 'filtered red light passes a red door')
+
+  const white = level([
+    emitter(0, 3, 1),
+    { id: 'dd', type: 'door', x: 2, y: 3, rotation: 0, color: 'red' },
+    receiver(4, 3, 'red'),
+  ])
+  assert.equal(evaluate(white, {}).solved, false, 'white light is stopped by a red door')
+})
+
+test('a directional crystal only accepts light from one side', () => {
+  const fromWest = level([emitter(0, 3, 1), receiver(3, 3, 'white', 'r1', { enter: 1 })])
+  assert.equal(evaluate(fromWest, {}).solved, true)
+
+  const wrongSide = level([emitter(0, 3, 1), receiver(3, 3, 'white', 'r1', { enter: 3 })])
+  assert.equal(evaluate(wrongSide, {}).solved, false)
+})
+
 test('every world generates boards whose built configuration solves', () => {
   for (const world of [1, 2, 3, 4, 5]) {
     const size = [5, 6, 7, 8, 9][world - 1]
     let built = null
-    for (let attempt = 0; attempt < 40 && !built; attempt += 1) {
+    for (let attempt = 0; attempt < 60 && !built; attempt += 1) {
       const candidate = buildCandidate({ world, size: [size, size], random: mulberry32(1000 + world * 97 + attempt) })
       if (!candidate) continue
-      const rotations = {}
-      for (const device of candidate.devices) if (device.rotatable) rotations[device.id] = device.rotation ?? 0
-      const result = evaluate({ ...candidate, devices: candidate.devices }, rotations)
-      if (result.solved) built = candidate
+      if (evaluateState(candidate, candidate.solution).solved) built = candidate
     }
     assert.ok(built, `world ${world} should produce at least one self-consistent board`)
   }
