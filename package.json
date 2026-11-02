@@ -14,7 +14,7 @@
     "lint": "oxlint src scripts",
     "check:levels": "node scripts/check-levels.mjs",
     "smoke": "node scripts/smoke.mjs",
-    "check:live": "node scripts/check-live.mjs",
+    "check:live": "PRISM_URL=https://jd4rider.github.io/prism-party/play/ node scripts/smoke.mjs",
     "desktop": "electron ."
   },
   "dependencies": {
