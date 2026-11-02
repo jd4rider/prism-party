@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#080b16" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta
+      name="description"
+      content="Prism Party — a relaxing light-routing puzzle. Turn mirrors, split the spectrum and light every crystal. Part of Little Joy Arcade."
+    />
+    <title>Prism Party — Little Joy Arcade</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="apple-touch-icon" href="./icon-180.png" />
+  </head>
+  <body>
+    <div id="game" role="application" aria-label="Prism Party, a light puzzle game"></div>
+    <div class="prism-loading" id="loading">Lighting the crystals</div>
+    <noscript>Prism Party needs JavaScript to run.</noscript>
+    <script src="./arcade-client.js" data-game-id="prism-party" defer></script>
+    <script type="module" src="/src/main.js"></script>
+    <script>
+      window.addEventListener('load', () => {
+        const loading = document.getElementById('loading')
+        if (loading) loading.setAttribute('hidden', '')
+      })
+    </script>
+  </body>
+</html>

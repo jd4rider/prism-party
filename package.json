@@ -1,0 +1,63 @@
+{
+  "name": "prism-party",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Prism Party — a 2.5D light-routing puzzle for Little Joy Arcade",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test src/optics/*.test.js",
+    "bake": "node scripts/bake-levels.mjs",
+    "bake:verbose": "node scripts/bake-levels.mjs --verbose",
+    "lint": "oxlint src scripts",
+    "check:levels": "node scripts/check-levels.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "check:live": "node scripts/check-live.mjs",
+    "desktop": "electron ."
+  },
+  "dependencies": {
+    "phaser": "^4.2.1"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "oxlint": "^1.40.0",
+    "playwright-core": "^1.64.1",
+    "vite": "^7.1.5"
+  },
+  "main": "electron/main.cjs",
+  "build": {
+    "appId": "site.littlejoyarcade.prismparty",
+    "productName": "Prism Party",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**",
+      "dist-web/**"
+    ],
+    "mac": {
+      "category": "public.app-category.puzzle-games",
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ]
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": "nsis"
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "target": "AppImage"
+    }
+  }
+}

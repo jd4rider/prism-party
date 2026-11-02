@@ -1,0 +1,57 @@
+:root {
+  color-scheme: dark;
+  --page: #080b16;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: radial-gradient(circle at 50% 20%, #1a2140 0%, var(--page) 62%);
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+  font-family: 'Trebuchet MS', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#game {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+#game canvas {
+  display: block;
+  touch-action: none;
+  border-radius: 14px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+}
+
+.prism-loading {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #cdd6ff;
+  letter-spacing: 0.32em;
+  font-size: 13px;
+  text-transform: uppercase;
+  pointer-events: none;
+  transition: opacity 400ms ease;
+}
+
+.prism-loading[hidden] {
+  opacity: 0;
+  display: flex;
+}
