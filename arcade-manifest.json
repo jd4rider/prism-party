@@ -11,7 +11,18 @@
   "playUrl": "https://jd4rider.github.io/prism-party/play/",
   "siteUrl": "https://jd4rider.github.io/prism-party/",
   "repoUrl": "https://github.com/jd4rider/prism-party",
-  "downloads": [],
+  "downloads": [
+    {
+      "label": "macOS (Apple Silicon)",
+      "platform": "macOS",
+      "url": "https://github.com/jd4rider/prism-party/releases/download/v0.1.0/Prism%20Party-0.1.0-arm64.dmg"
+    },
+    {
+      "label": "macOS (Intel)",
+      "platform": "macOS",
+      "url": "https://github.com/jd4rider/prism-party/releases/download/v0.1.0/Prism%20Party-0.1.0.dmg"
+    }
+  ],
   "cover": { "from": "#7c5cf6", "to": "#1a1235", "emoji": "🔷" },
   "highlights": [
     "200 puzzles, each solved and verified by a backtracking solver before shipping",

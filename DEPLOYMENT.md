@@ -28,6 +28,8 @@ no Node integration. External links open in the system browser.
 ```bash
 npm run build
 npx electron-builder --mac --publish never     # or --win / --linux
+gh release upload v0.1.0 "dist/Prism Party-0.1.0-arm64.dmg" --clobber
+open "dist/mac-arm64/Prism Party.app"          # or copy it to /Applications
 ```
 
 `.github/workflows/release.yml` runs the same on a `v*` tag and attaches the macOS DMGs,
@@ -59,7 +61,7 @@ To enable it later:
 - [x] `npm test` passes
 - [x] `npm run build` is clean
 - [x] Pages workflow green
-- [x] Live URL loads, plays and saves
+- [x] Live URL loads, plays and saves (16/16 headless checks against the deployed build)
 - [x] Catalogue row published with the live play URL
-- [ ] `v0.1.0` tag pushed to attach desktop installers
+- [x] `v0.1.0` tagged with both macOS DMGs attached
 - [ ] Subdomain enabled (see above)
