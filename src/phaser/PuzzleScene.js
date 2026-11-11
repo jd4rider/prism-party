@@ -1,4 +1,5 @@
 import Phaser from 'phaser'
+import { openTipJar } from './support.js'
 import {
   H,
   W,
@@ -873,7 +874,17 @@ export default class PuzzleScene extends Phaser.Scene {
       textColor: theme.dark ? '#efeaff' : theme.text,
       hitDepth: 96,
     })
-    overlay.add([card, primary, replay, menu])
+    // Quiet support link: results screen only, under the actions.
+    const tip = button(this, buttonX, 520 + 300, '☕ Buy me a coffee', () => openTipJar(), {
+      width: 380,
+      height: 40,
+      size: 14,
+      theme,
+      fill: theme.dark ? 0x2b2f52 : 0xffffff,
+      textColor: theme.dark ? '#efeaff' : theme.text,
+      hitDepth: 96,
+    })
+    overlay.add([card, primary, replay, menu, tip])
     card.setScale(0.9)
     this.tweens.add({ targets: card, scale: 1, duration: 260, ease: 'Back.Out' })
   }
